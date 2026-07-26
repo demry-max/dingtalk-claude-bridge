@@ -20,7 +20,7 @@ mkdir -p ~/dingtalk-claude-bridge/src ~/dingtalk-claude-bridge/scripts/windows ~
 cd ~/dingtalk-claude-bridge
 npm init -y
 npm pkg set type=module scripts.start="node src/index.js"
-npm install dingtalk-stream dotenv cross-spawn
+npm install dingtalk-stream dotenv cross-spawn cron-parser
 ```
 
 ## 步骤 2：写入 `.env` 与 `.gitignore`
@@ -31,7 +31,7 @@ npm install dingtalk-stream dotenv cross-spawn
 DINGTALK_CLIENT_ID=
 DINGTALK_CLIENT_SECRET=
 
-ALLOWED_TOOLS=Read,Grep,Glob,WebSearch,WebFetch,Write(./memory/**),Edit(./memory/**),Write(./skills/**),Edit(./skills/**)   # owner 可用工具（含记忆/技能落盘）
+ALLOWED_TOOLS=Read,Grep,Glob,WebSearch,WebFetch,Write(./memory/**),Edit(./memory/**),Write(./skills/**),Edit(./skills/**),Write(./schedules/**),Edit(./schedules/**)   # owner 可用工具（含记忆/技能落盘）
 NON_OWNER_TOOLS=WebSearch,WebFetch                # 其他成员可用工具
 CLAUDE_MODEL=                                     # 留空=默认；可填 haiku/sonnet/opus
 CLAUDE_TIMEOUT_MS=300000
@@ -156,8 +156,10 @@ function syncSkills() {
 
 // 模型对自身身份的自述不可靠（无头模式无人告知它跑在哪个模型上，它会凭训练记忆瞎猜）。
 // 由桥接把真实配置写进工作区，CLAUDE.md 用 @runtime.md 引入，问到时以此为准。
-function writeRuntimeInfo() {
+function writeRuntimeInfo(chatId) {
   try {
+    // 定时任务用的是 sched: 前缀的伪会话，不是真实飞书会话，不写入
+    const realChat = typeof chatId === 'string' && !chatId.startsWith('sched:') ? chatId : null;
     fs.writeFileSync(
       path.join(WORKSPACE_DIR, 'runtime.md'),
       [
@@ -165,8 +167,10 @@ function writeRuntimeInfo() {
         '',
         `- 模型：${CLAUDE_MODEL || '（未指定，走 claude CLI 默认）'}`,
         `- 思考深度 effort：${CLAUDE_EFFORT || '（未指定，走 CLI 默认）'}`,
+        `- 当前会话 chat_id：${realChat ?? '（本次为定时任务，无会话）'}`,
         '',
         '用户问「你用什么模型/什么档位」时，**以本文件为准**，不要凭自身记忆推测。',
+        '创建定时任务时，`chat_id` 直接用上面这个值。',
       ].join('\n') + '\n'
     );
   } catch (e) {
@@ -183,7 +187,7 @@ function writeRuntimeInfo() {
  */
 export function runClaude(chatId, prompt, isOwner = false, extraTools = [], onProgress = null) {
   syncSkills();
-  writeRuntimeInfo();
+  writeRuntimeInfo(chatId);
   // 提示词走 stdin：--allowedTools 等可变参数选项会吞掉后置的位置参数
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (sessions[chatId]) args.push('--resume', sessions[chatId]);
@@ -308,3 +312,5 @@ cd ~/dingtalk-claude-bridge && npm start
 | 下载图片/文件报权限错 | 后台「权限管理」搜索开通机器人消息相关权限后重新发布 |
 | 提示登录过期 | 主机终端 `claude /login`；根治：`claude setup-token` 长期令牌写入 `.env` 的 `CLAUDE_CODE_OAUTH_TOKEN=` |
 | 安全红线 | `.env` 不入库不外发；不给无人值守机器人开 Write/Bash；不用 `--dangerously-skip-permissions` |
+
+> **定时任务**：本仓库的 `src/scheduler.js` 也需一并写入（从仓库原样复制），并在 `src/index.js` 末尾接线；机器人把任务定义写进 `workspace/schedules/*.json`，桥接到点执行——**不要给机器人 Bash 权限**。

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
 import { runClaude, resetSession, sessionInfo, WORKSPACE_DIR } from './claude.js';
 import { loadOwner, saveOwner } from './store.js';
+import { startScheduler } from './scheduler.js';
 
 const CLIENT_ID = process.env.DINGTALK_CLIENT_ID;
 const CLIENT_SECRET = process.env.DINGTALK_CLIENT_SECRET;
@@ -210,6 +211,44 @@ client.registerCallbackListener(TOPIC_ROBOT, async (res) => {
   } catch (e) {
     console.error('[handle]', e);
   }
+});
+
+// ---- 定时任务：到点跑 Claude，把结果主动发给用户 ----
+// 注意：消息里的 sessionWebhook 有时效，定时场景不能复用，必须走机器人主动发消息 API。
+// 任务文件的 chat_id 填收件人的 staffId（机器人收到消息时日志里的 senderStaffId）。
+async function sendProactive(staffId, text) {
+  const res = await fetch('https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend', {
+    method: 'POST',
+    headers: {
+      'x-acs-dingtalk-access-token': await accessToken(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      robotCode: CLIENT_ID,
+      userIds: [staffId],
+      msgKey: 'sampleMarkdown',
+      msgParam: JSON.stringify({ title: 'Claude', text: text.slice(0, 18000) }),
+    }),
+  });
+  const d = await res.json();
+  if (d.code || d.errcode) console.error('[sched] 主动发送失败:', JSON.stringify(d).slice(0, 200));
+}
+
+startScheduler({
+  schedulesDir: path.join(WORKSPACE_DIR, 'schedules'),
+  stateFile: path.join(WORKSPACE_DIR, '..', 'data', 'schedule-state.json'),
+  onFire: async (job) => {
+    const staffId = job.chat_id;
+    if (!staffId) {
+      console.error(`[sched] 任务「${job.name ?? job._file}」缺 chat_id（钉钉 staffId），跳过`);
+      return;
+    }
+    // 定时任务用独立会话上下文，避免污染用户正在进行的对话
+    const answer = await runClaude(`sched:${job._file}`, job.prompt, true, [], (p) =>
+      sendProactive(staffId, `⏳ ${p}`)
+    );
+    await sendProactive(staffId, `⏰ **${job.name ?? '定时任务'}**\n\n${answer || '（无输出）'}`);
+  },
 });
 
 console.log('启动钉钉 Stream 长连接…');
