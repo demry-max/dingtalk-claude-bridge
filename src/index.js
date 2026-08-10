@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
-import { runClaude, resetSession, sessionInfo, WORKSPACE_DIR } from './claude.js';
+import { runClaude, resetSession, sessionInfo, WORKSPACE_DIR , getRuntimeConfig, setRuntimeConfig, MODEL_ALIASES, EFFORT_LEVELS } from './claude.js';
 import { loadOwner, saveOwner } from './store.js';
 import { startScheduler } from './scheduler.js';
 
@@ -239,6 +239,17 @@ startScheduler({
   stateFile: path.join(WORKSPACE_DIR, '..', 'data', 'schedule-state.json'),
   onFire: async (job) => {
     const staffId = job.chat_id;
+    // 动作型任务：切换模型/思考档，不走 Claude 调用
+    if (job.action === 'set-model') {
+      try {
+        const next = setRuntimeConfig({ model: job.model, effort: job.effort });
+        console.log(`[sched] 已切换模型 → ${next.model} / ${next.effort}`);
+        if (staffId) await sendProactive(chatId, `🔀 ${job.name ?? '定时切换'}：模型 ${next.model || 'CLI 默认'}，思考深度 ${next.effort || 'CLI 默认'}`);
+      } catch (e) {
+        console.error('[sched] 切换模型失败:', e?.message ?? e);
+      }
+      return;
+    }
     if (!staffId) {
       console.error(`[sched] 任务「${job.name ?? job._file}」缺 chat_id（钉钉 staffId），跳过`);
       return;
