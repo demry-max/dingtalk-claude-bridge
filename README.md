@@ -1,6 +1,6 @@
 # dingtalk-claude-bridge
 
-[![version](https://img.shields.io/badge/version-2.0.0-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![version](https://img.shields.io/badge/version-2.0.1-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **把 Claude Code 接进钉钉** —— 单聊或群里 @机器人，让 Claude 回答问题、看图片、听语音（钉钉自带转写）、读文件，并保持上下文连续。走钉钉 **Stream 模式**长连接，**无需公网服务器、域名、回调地址**，跑在一台装有 Claude Code 的电脑上即可。
 
